@@ -1,0 +1,5 @@
+packages: hopper hopper-distributed hopper-thrift
+
+allow-newer: pinch-gen:base
+
+extra-packages: pinch-gen

@@ -1,0 +1,54 @@
+cabal-version: 2.4
+name:          hopper-thrift
+version:       0.1.0.0
+
+-- synopsis:
+-- description:
+license:       BSD-3-Clause
+license-file:  LICENSE
+author:        Alex Biehl
+maintainer:    alex@scarf.sh
+
+-- copyright:
+build-type:    Simple
+
+-- extra-source-files:
+
+common stuff
+  build-depends:      relude
+  default-extensions:
+    DerivingStrategies
+    DuplicateRecordFields
+    OverloadedStrings
+    RecordWildCards
+    Strict
+    StrictData
+    OverloadedRecordDot
+
+  mixins:
+    base hiding (Prelude),
+    relude (Relude as Prelude),
+    relude
+
+common warnings
+  ghc-options: -Wall -Wno-name-shadowing
+
+library
+  import:           warnings, stuff
+  exposed-modules:
+    Hopper.Thrift.Hopper.Client
+    Hopper.Thrift.Hopper.Server
+    Hopper.Thrift.Hopper.Types
+
+  -- other-modules:
+  -- other-extensions:
+  build-depends:
+    , base              ^>=4.17.0.0
+    , deepseq
+    , hashable
+    , pinch
+    , vector
+    , vector-instances
+
+  hs-source-dirs:   gen-src
+  default-language: GHC2021

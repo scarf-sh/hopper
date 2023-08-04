@@ -1,0 +1,15 @@
+[formatter.haskell]
+command = "ormolu"
+options = [
+  "--mode", "inplace"
+]
+includes = ["*.hs"]
+excludes = ["dist-newstyle/*"]
+
+[formatter.cabal]
+command = "cabal-fmt"
+options = [
+  "-i"
+]
+includes = ["*.cabal"]
+excludes = ["dist-newstyle/*"]
