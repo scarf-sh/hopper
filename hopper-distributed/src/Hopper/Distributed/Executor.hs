@@ -33,6 +33,7 @@ run schedulerHost schedulerPort executeTask = do
         result <-
           handleTaskExecution
             client
+            (fmap fromIntegral requestNextTaskResponse.requestNextTaskResponse_timeout_in_seconds)
             taskId
             (executeTask taskId (Task task))
 
@@ -50,10 +51,11 @@ run schedulerHost schedulerPort executeTask = do
 
 handleTaskExecution ::
   Client ->
+  Maybe Int ->
   TaskId Task ->
   IO (TaskResult Task) ->
   IO Hopper.Thrift.Hopper.Types.TaskResult
-handleTaskExecution client taskId execute = do
+handleTaskExecution client timeoutInSeconds taskId execute = do
   clockVar <- newTVarIO 0
   Control.Concurrent.Async.withAsync (ticker clockVar) $ \_clockThread ->
     Control.Concurrent.Async.withAsync execute $ \handle -> do
@@ -80,33 +82,40 @@ handleTaskExecution client taskId execute = do
                 case result of
                   Left exception ->
                     pure $
-                      Just
+                      Right
                         ( Hopper.Thrift.Hopper.Types.TaskResult_Error_message
                             (show exception)
                         )
                   Right result ->
                     pure $
-                      Just
+                      Right
                         ( Hopper.Thrift.Hopper.Types.TaskResult_Task_result
                             result
                         ),
               do
                 t1 <- clock
                 guard (t1 /= t0)
-                pure Nothing
+                pure (Left t1)
             ]
 
       case result of
-        Nothing -> do
-          _ <-
-            call
-              client
-              ( Hopper.Thrift.Hopper.Client.heartbeat
-                  Hopper.Thrift.Hopper.Types.HeartbeatRequest
-                    { heartbeatRequest_task_id = Just taskId,
-                      heartbeatRequest_task_result = Nothing
-                    }
-              )
-          loop clock handle
-        Just result ->
+        Left time
+          | time >= fromMaybe maxBound timeoutInSeconds -> do
+              Control.Concurrent.Async.cancel handle
+              pure
+                ( Hopper.Thrift.Hopper.Types.TaskResult_Timeout
+                    Hopper.Thrift.Hopper.Types.Timeout
+                )
+          | otherwise -> do
+              _ <-
+                call
+                  client
+                  ( Hopper.Thrift.Hopper.Client.heartbeat
+                      Hopper.Thrift.Hopper.Types.HeartbeatRequest
+                        { heartbeatRequest_task_id = Just taskId,
+                          heartbeatRequest_task_result = Nothing
+                        }
+                  )
+              loop clock handle
+        Right result ->
           pure result

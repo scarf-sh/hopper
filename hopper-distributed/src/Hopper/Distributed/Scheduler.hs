@@ -55,7 +55,7 @@ requestNextTask scheduler _request = do
         Hopper.Thrift.Hopper.Types.RequestNextTaskResponse
           { requestNextTaskResponse_task_id = Just task.id,
             requestNextTaskResponse_task = Just (taskToByteString task.task),
-            requestNextTaskResponse_timeout_in_seconds = Nothing
+            requestNextTaskResponse_timeout_in_seconds = Nothing -- TODO
           }
     Nothing ->
       pure
@@ -78,6 +78,8 @@ heartbeat scheduler request = do
         ( case request.heartbeatRequest_task_result of
             Just (Hopper.Thrift.Hopper.Types.TaskResult_Error_message errorMessage) ->
               Just (Left (Hopper.Scheduler.TaskExecutionException errorMessage))
+            Just (Hopper.Thrift.Hopper.Types.TaskResult_Timeout {}) ->
+              Just (Left Hopper.Scheduler.TaskExecutionTimedOut)
             Just (Hopper.Thrift.Hopper.Types.TaskResult_Task_result result) ->
               Just (Right result)
             Nothing ->
