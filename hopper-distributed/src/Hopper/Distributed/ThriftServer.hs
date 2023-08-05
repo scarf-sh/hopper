@@ -49,7 +49,7 @@ import Pinch.Server
 import Pinch.Transport
   ( Connection (..),
     Transport (..),
-    framedTransport,
+    unframedTransport,
   )
 import System.IO.Error (ioeGetErrorType)
 import qualified System.TimeManager
@@ -197,7 +197,7 @@ runSettingsChannelMaker !settings@Settings {fork = forkWithUnmask} getChannelMak
 
 defaultCreateChannel :: (Connection c) => c -> IO Channel
 defaultCreateChannel connection =
-  createChannel connection framedTransport compactProtocol
+  createChannel connection unframedTransport compactProtocol
 
 defaultAccept :: Socket -> IO (Socket, SockAddr)
 defaultAccept =

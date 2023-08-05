@@ -8,7 +8,7 @@ where
 import Data.Streaming.Network (getSocketTCP)
 import Pinch.Client (Client, call, client, createChannel)
 import Pinch.Protocol.Compact (compactProtocol)
-import Pinch.Transport (framedTransport)
+import Pinch.Transport (unframedTransport)
 
 newClient ::
   ByteString ->
@@ -16,5 +16,5 @@ newClient ::
   IO Client
 newClient host port = do
   (socket, _sockAddr) <- getSocketTCP host port
-  channel <- createChannel socket framedTransport compactProtocol
+  channel <- createChannel socket unframedTransport compactProtocol
   pure (client channel)
