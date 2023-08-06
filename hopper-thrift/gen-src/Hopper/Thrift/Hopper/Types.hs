@@ -53,9 +53,24 @@ instance Control.DeepSeq.NFData RequestNextTaskResponse
 
 instance Data.Hashable.Hashable RequestNextTaskResponse
 
+data Timeout = Timeout {}
+  deriving (Prelude.Eq, GHC.Generics.Generic, Prelude.Show)
+
+instance Pinch.Pinchable Timeout where
+  type Tag Timeout = Pinch.TStruct
+
+  pinch Timeout = Pinch.struct ([])
+
+  unpinch value = Prelude.pure (Timeout)
+
+instance Control.DeepSeq.NFData Timeout
+
+instance Data.Hashable.Hashable Timeout
+
 data TaskResult
   = TaskResult_Task_result Data.ByteString.ByteString
   | TaskResult_Error_message Data.Text.Text
+  | TaskResult_Timeout Timeout
   deriving (Prelude.Eq, GHC.Generics.Generic, Prelude.Show)
 
 instance Pinch.Pinchable TaskResult where
@@ -63,8 +78,9 @@ instance Pinch.Pinchable TaskResult where
 
   pinch (TaskResult_Task_result x) = Pinch.union (1) (x)
   pinch (TaskResult_Error_message x) = Pinch.union (2) (x)
+  pinch (TaskResult_Timeout x) = Pinch.union (3) (x)
 
-  unpinch v = ((Control.Applicative.empty Control.Applicative.<|> (TaskResult_Task_result Prelude.<$> (v Pinch..: 1))) Control.Applicative.<|> (TaskResult_Error_message Prelude.<$> (v Pinch..: 2)))
+  unpinch v = (((Control.Applicative.empty Control.Applicative.<|> (TaskResult_Task_result Prelude.<$> (v Pinch..: 1))) Control.Applicative.<|> (TaskResult_Error_message Prelude.<$> (v Pinch..: 2))) Control.Applicative.<|> (TaskResult_Timeout Prelude.<$> (v Pinch..: 3)))
 
 instance Control.DeepSeq.NFData TaskResult
 

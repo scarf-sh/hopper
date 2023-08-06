@@ -10,9 +10,12 @@ struct RequestNextTaskResponse {
     3: optional i32 timeout_in_seconds;
 }
 
+struct Timeout {}
+
 union TaskResult {
     1: binary task_result;
     2: string error_message;
+    3: Timeout timeout;
 }
 
 struct HeartbeatRequest {
