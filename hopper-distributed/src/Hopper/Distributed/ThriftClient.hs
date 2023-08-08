@@ -6,6 +6,7 @@ module Hopper.Distributed.ThriftClient
 where
 
 import Data.Streaming.Network (getSocketTCP)
+import Hopper.Distributed.ThriftServer (newSocketConnection)
 import Pinch.Client (Client, call, client, createChannel)
 import Pinch.Protocol.Compact (compactProtocol)
 import Pinch.Transport (unframedTransport)
@@ -16,5 +17,6 @@ newClient ::
   IO Client
 newClient host port = do
   (socket, _sockAddr) <- getSocketTCP host port
-  channel <- createChannel socket unframedTransport compactProtocol
+  socketConnection <- newSocketConnection socket
+  channel <- createChannel socketConnection unframedTransport compactProtocol
   pure (client channel)

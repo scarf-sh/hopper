@@ -11,6 +11,8 @@ module Hopper.Distributed.ThriftServer
     runSettingsSocket,
     runSettingsConnection,
     runSettingsChannelMaker,
+    SocketConnection,
+    newSocketConnection,
   )
 where
 
@@ -24,9 +26,13 @@ import Control.Exception
     mask_,
     try,
   )
+import qualified Data.ByteString.Internal
 import Data.Streaming.Network (HostPreference, bindPortTCP)
 import qualified Data.Text.IO
 import Foreign.C.Error (Errno (..), eCONNABORTED)
+import Foreign.ForeignPtr (ForeignPtr, newForeignPtr)
+import Foreign.Marshal.Alloc (finalizerFree, mallocBytes)
+import GHC.ForeignPtr (unsafeWithForeignPtr)
 import GHC.IO.Exception (IOErrorType (..), IOException (..))
 import Network.Socket
   ( SockAddr,
@@ -38,6 +44,8 @@ import Network.Socket
     setSocketOption,
     withFdSocket,
   )
+import qualified Network.Socket.BufferPool
+import Network.Socket.ByteString (sendAll)
 import Pinch.Protocol.Compact (compactProtocol)
 import Pinch.Server
   ( Channel (..),
@@ -51,6 +59,7 @@ import Pinch.Transport
     Transport (..),
     unframedTransport,
   )
+import qualified Pinch.Transport.Builder
 import System.IO.Error (ioeGetErrorType)
 import qualified System.TimeManager
 
@@ -98,13 +107,14 @@ runSettingsSocket settings socket context server = do
     closeListeningSocket :: IO ()
     closeListeningSocket = close socket
 
-    getConnection :: IO (Socket, IO ())
+    getConnection :: IO (SocketConnection, IO ())
     getConnection = do
       (socket, _socketAddr) <- settings.accept socket
       withFdSocket socket setCloseOnExecIfNeeded
       -- NoDelay causes an error for AF_UNIX.
       setSocketOption socket NoDelay 1 `catch` \(_ :: SomeException) -> return ()
-      pure (socket, close socket)
+      socketConnection <- newSocketConnection socket
+      pure (socketConnection, close socket)
 
 runSettingsConnection :: (Connection connection) => Settings -> IO (connection, IO ()) -> Context -> ThriftServer -> IO ()
 runSettingsConnection settings@Settings {createChannel} getConnection context server = do
@@ -235,3 +245,65 @@ wrapChannel handle channel =
   channel
     { cTransportIn = wrapTransport handle channel.cTransportIn
     }
+
+data Buffer = Buffer
+  { size :: !Int,
+    buffer :: !(ForeignPtr Word8)
+  }
+
+type WriteBuffer = IORef Buffer
+
+-- | Create a new 'WriteBuffer'.
+newWriteBuffer :: Int -> IO WriteBuffer
+newWriteBuffer size = do
+  buffer <- mallocBytes size
+  buffer <- newForeignPtr finalizerFree buffer
+  newIORef Buffer {size, buffer}
+
+-- | Send data to a 'Socket'. Use our pre-allocated per-connection 'WriteBuffer' to
+-- render the bytes to then send them to the socket. In case the 'WriteBuffer' is too
+-- small allocates a bigger one and leaves the old for garbage collection.
+sendViaWriteBuffer :: WriteBuffer -> Socket -> Pinch.Transport.Builder.Builder -> IO ()
+sendViaWriteBuffer writeBuffer socket builder = do
+  let !bytesToWrite =
+        Pinch.Transport.Builder.getSize builder
+
+  buffer <- readIORef writeBuffer
+
+  buffer <-
+    if buffer.size >= bytesToWrite
+      then pure buffer.buffer
+      else do
+        buffer <- mallocBytes bytesToWrite
+        buffer <- newForeignPtr finalizerFree buffer
+        writeIORef writeBuffer Buffer {size = bytesToWrite, buffer}
+        pure buffer
+
+  unsafeWithForeignPtr buffer $ \op ->
+    Pinch.Transport.Builder.unsafeRunBuilder builder op
+
+  sendAll socket (Data.ByteString.Internal.fromForeignPtr0 buffer bytesToWrite)
+
+-- | Our own little connection type. We allocate from an arena for received data
+-- and use a pre-allocated write buffer when sending data to avoid big allocations
+-- in the average case.
+data SocketConnection = SocketConnection
+  { receive :: IO ByteString,
+    send :: Pinch.Transport.Builder.Builder -> IO ()
+  }
+
+newSocketConnection :: Socket -> IO SocketConnection
+newSocketConnection socket = do
+  -- Warp uses 16k pre-allocated buffers per connection.
+  -- Let's do the same for now.
+  readBuffer <- Network.Socket.BufferPool.newBufferPool 128 16384
+  writeBuffer <- newWriteBuffer 16384
+  pure
+    SocketConnection
+      { receive = Network.Socket.BufferPool.receive socket readBuffer,
+        send = sendViaWriteBuffer writeBuffer socket
+      }
+
+instance Connection SocketConnection where
+  cGetSome socketConnection = socketConnection.receive
+  cPut socketConnection = socketConnection.send
