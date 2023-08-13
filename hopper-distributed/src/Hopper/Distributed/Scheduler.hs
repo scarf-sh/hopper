@@ -70,19 +70,21 @@ heartbeat ::
   Hopper.Thrift.Hopper.Types.HeartbeatRequest ->
   IO ()
 heartbeat scheduler request = do
-  whenJust request.heartbeatRequest_task_id $ \taskId -> do
-    void $
-      Hopper.Scheduler.reportTaskStatus
-        scheduler
-        taskId
-        ( case request.heartbeatRequest_task_result of
-            Just (Hopper.Thrift.Hopper.Types.TaskResult_Error_message errorMessage) ->
-              Just (Left (Hopper.Scheduler.TaskExecutionException errorMessage))
-            Just (Hopper.Thrift.Hopper.Types.TaskResult_Timeout {}) ->
-              Just (Left Hopper.Scheduler.TaskExecutionTimedOut)
-            Just (Hopper.Thrift.Hopper.Types.TaskResult_Task_result result) ->
-              Just (Right result)
-            Nothing ->
-              Nothing
-        )
-        (Just 1)
+  void $
+    Hopper.Scheduler.reportTaskStatus
+      scheduler
+      [ (taskId, taskResult)
+        | taskStatus <- maybe [] toList request.heartbeatRequest_task_status,
+          Just taskId <- [taskStatus.taskStatus_task_id],
+          let taskResult =
+                case taskStatus.taskStatus_task_result of
+                  Just (Hopper.Thrift.Hopper.Types.TaskResult_Error_message errorMessage) ->
+                    Just (Left (Hopper.Scheduler.TaskExecutionException errorMessage))
+                  Just (Hopper.Thrift.Hopper.Types.TaskResult_Timeout {}) ->
+                    Just (Left Hopper.Scheduler.TaskExecutionTimedOut)
+                  Just (Hopper.Thrift.Hopper.Types.TaskResult_Task_result result) ->
+                    Just (Right result)
+                  Nothing ->
+                    Nothing
+      ]
+      (Just 1)

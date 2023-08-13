@@ -2,6 +2,7 @@ module Hopper.Distributed.Executor (run) where
 
 import Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.Async
+import qualified Data.Vector
 import Hopper.Distributed.Scheduler (Task (..))
 import Hopper.Distributed.ThriftClient (Client, call, newClient)
 import Hopper.Scheduler (TaskId, TaskResult)
@@ -42,8 +43,14 @@ run schedulerHost schedulerPort executeTask = do
             client
             ( Hopper.Thrift.Hopper.Client.heartbeat
                 Hopper.Thrift.Hopper.Types.HeartbeatRequest
-                  { heartbeatRequest_task_id = Just taskId,
-                    heartbeatRequest_task_result = Just result
+                  { heartbeatRequest_task_status =
+                      Just $
+                        Data.Vector.singleton
+                          ( Hopper.Thrift.Hopper.Types.TaskStatus
+                              { taskStatus_task_id = Just taskId,
+                                taskStatus_task_result = Just result
+                              }
+                          )
                   }
             )
       Nothing ->
@@ -112,8 +119,14 @@ handleTaskExecution client timeoutInSeconds taskId execute = do
                   client
                   ( Hopper.Thrift.Hopper.Client.heartbeat
                       Hopper.Thrift.Hopper.Types.HeartbeatRequest
-                        { heartbeatRequest_task_id = Just taskId,
-                          heartbeatRequest_task_result = Nothing
+                        { heartbeatRequest_task_status =
+                            Just $
+                              Data.Vector.singleton
+                                ( Hopper.Thrift.Hopper.Types.TaskStatus
+                                    { taskStatus_task_id = Just taskId,
+                                      taskStatus_task_result = Nothing
+                                    }
+                                )
                         }
                   )
               loop clock handle

@@ -37,7 +37,7 @@ data Scheduler node task = Scheduler
     scheduleTask :: Scheduler.Task task -> STM (),
     -- | Heartbeat a task and maybe report the result of the task. This operation will
     -- block in case the scheduler is not ready to receive the status.
-    reportTaskStatus :: Scheduler.TaskId task -> Bool -> STM (),
+    reportTaskStatus :: [(Scheduler.TaskId task, Bool)] -> STM (),
     -- | Workers request tasks from the scheduler. This is a blocking action.
     requestTask :: node -> STM (Scheduler.Task task),
     -- | Report back the result of task execution back to the driver application.
@@ -64,7 +64,6 @@ withScheduler reportLostTasks reportTaskResult action =
     -- task producer and scheduler run at the same rate without any intermediate
     -- buffering.
     taskQueue <- newEmptyTMVarIO
-    taskStatusQueue <- newEmptyTMVarIO
     lostTaskQueue <- newEmptyTMVarIO
 
     scheduler <-
@@ -74,8 +73,6 @@ withScheduler reportLostTasks reportTaskResult action =
             { epoch,
               taskToSchedule =
                 takeTMVar taskQueue,
-              taskStatus =
-                takeTMVar taskStatusQueue,
               lostTask = \attemptedTasks reason ->
                 putTMVar lostTaskQueue ((fmap (.task) attemptedTasks), reason)
             }
@@ -95,8 +92,8 @@ withScheduler reportLostTasks reportTaskResult action =
               scheduler.shutdown,
             scheduleTask = \task ->
               putTMVar taskQueue task,
-            reportTaskStatus = \taskId status ->
-              putTMVar taskStatusQueue (taskId, status),
+            reportTaskStatus = \taskStatus ->
+              scheduler.reportTaskStatus taskStatus,
             requestTask = \node ->
               fmap (.task) (scheduler.schedule node)
           }
@@ -134,18 +131,17 @@ requestTask runtime node timeout =
 
 reportTaskStatus ::
   Scheduler node task ->
-  Scheduler.TaskId task ->
-  Maybe (Either TaskExecutionError (Scheduler.TaskResult task)) ->
+  [(Scheduler.TaskId task, Maybe (Either TaskExecutionError (Scheduler.TaskResult task)))] ->
   Maybe Timeout ->
   IO Bool
-reportTaskStatus runtime taskId taskResult timeout = do
+reportTaskStatus runtime taskStatus timeout = do
   result <-
     withTimeout
       runtime
-      (runtime.reportTaskStatus taskId (isJust taskResult))
+      (runtime.reportTaskStatus [(taskId, isJust taskResult) | (taskId, taskResult) <- taskStatus])
       timeout
 
-  whenJust result $ \_ ->
+  for_ taskStatus $ \(taskId, taskResult) ->
     whenJust taskResult $ \taskResult ->
       runtime.reportTaskResult taskId taskResult
 
