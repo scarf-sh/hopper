@@ -86,15 +86,29 @@ instance Control.DeepSeq.NFData TaskResult
 
 instance Data.Hashable.Hashable TaskResult
 
-data HeartbeatRequest = HeartbeatRequest {heartbeatRequest_task_id :: (Prelude.Maybe TaskId), heartbeatRequest_task_result :: (Prelude.Maybe TaskResult)}
+data TaskStatus = TaskStatus {taskStatus_task_id :: (Prelude.Maybe TaskId), taskStatus_task_result :: (Prelude.Maybe TaskResult)}
+  deriving (Prelude.Eq, GHC.Generics.Generic, Prelude.Show)
+
+instance Pinch.Pinchable TaskStatus where
+  type Tag TaskStatus = Pinch.TStruct
+
+  pinch (TaskStatus taskStatus_task_id taskStatus_task_result) = Pinch.struct ([(1 Pinch.?= taskStatus_task_id), (2 Pinch.?= taskStatus_task_result)])
+
+  unpinch value = ((Prelude.pure (TaskStatus) Prelude.<*> (value Pinch..:? 1)) Prelude.<*> (value Pinch..:? 2))
+
+instance Control.DeepSeq.NFData TaskStatus
+
+instance Data.Hashable.Hashable TaskStatus
+
+data HeartbeatRequest = HeartbeatRequest {heartbeatRequest_task_status :: (Prelude.Maybe (Data.Vector.Vector TaskStatus))}
   deriving (Prelude.Eq, GHC.Generics.Generic, Prelude.Show)
 
 instance Pinch.Pinchable HeartbeatRequest where
   type Tag HeartbeatRequest = Pinch.TStruct
 
-  pinch (HeartbeatRequest heartbeatRequest_task_id heartbeatRequest_task_result) = Pinch.struct ([(1 Pinch.?= heartbeatRequest_task_id), (2 Pinch.?= heartbeatRequest_task_result)])
+  pinch (HeartbeatRequest heartbeatRequest_task_status) = Pinch.struct ([(1 Pinch.?= heartbeatRequest_task_status)])
 
-  unpinch value = ((Prelude.pure (HeartbeatRequest) Prelude.<*> (value Pinch..:? 1)) Prelude.<*> (value Pinch..:? 2))
+  unpinch value = (Prelude.pure (HeartbeatRequest) Prelude.<*> (value Pinch..:? 1))
 
 instance Control.DeepSeq.NFData HeartbeatRequest
 

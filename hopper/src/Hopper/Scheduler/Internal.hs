@@ -62,10 +62,7 @@ data Inputs node task = Inputs
     -- task for scheduling available.
     taskToSchedule :: STM (Task task),
     -- | Signal that a task was lost due to node becoming unavailable.
-    lostTask :: [Attempt node task] -> Reason -> STM (),
-    -- | Task status and heartbeat. Blocking action that returns a task status.
-    -- Also signals whether the task has completed.
-    taskStatus :: STM (TaskId task, Bool)
+    lostTask :: [Attempt node task] -> Reason -> STM ()
   }
 
 data State node task = State
@@ -76,6 +73,7 @@ data State node task = State
 
 data Scheduler node task = Scheduler
   { schedule :: node -> STM (Attempt node task),
+    reportTaskStatus :: [(TaskId task, Bool)] -> STM (),
     shutdown :: STM (),
     driver :: Driver
   }
@@ -119,9 +117,6 @@ scheduler !inputs = do
                     pure Nothing,
                   do
                     onEpochChange state
-                    pure driver_,
-                  do
-                    onTaskStatus state
                     pure driver_
                 ]
 
@@ -129,6 +124,8 @@ scheduler !inputs = do
     Scheduler
       { driver,
         shutdown,
+        reportTaskStatus =
+          reportTaskStatus state,
         schedule =
           scheduleTaskOnNode state
       }
@@ -149,23 +146,28 @@ scheduler !inputs = do
         HashMap.insert task.id attempt
       pure attempt
 
-    onTaskStatus :: State node task -> STM ()
-    onTaskStatus !state = do
-      (taskId, isCompleted) <- inputs.taskStatus
+    reportTaskStatus :: State node task -> [(TaskId task, Bool)] -> STM ()
+    reportTaskStatus !state status = do
       epoch <- inputs.epoch
-      modifyTVar' state.tasks $
-        if isCompleted
-          then HashMap.delete taskId
-          else
-            HashMap.alter
-              ( \attempt ->
-                  case attempt of
-                    Just Attempt {epoch = _epoch, ..} ->
-                      Just $! Attempt {epoch, ..}
-                    Nothing ->
-                      Nothing
-              )
-              taskId
+      modifyTVar' state.tasks $ \tasks ->
+        foldl'
+          ( \tasks (taskId, isCompleted) ->
+              if isCompleted
+                then HashMap.delete taskId tasks
+                else
+                  HashMap.alter
+                    ( \attempt ->
+                        case attempt of
+                          Just Attempt {epoch = _epoch, ..} ->
+                            Just $! Attempt {epoch, ..}
+                          Nothing ->
+                            Nothing
+                    )
+                    taskId
+                    tasks
+          )
+          tasks
+          status
 
     onEpochChange :: State node task -> STM ()
     onEpochChange !state = do

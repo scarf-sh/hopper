@@ -18,9 +18,13 @@ union TaskResult {
     3: Timeout timeout;
 }
 
-struct HeartbeatRequest {
+struct TaskStatus {
     1: optional TaskId task_id;
-    2: optional TaskResult task_result;
+    2: optional TaskResult task_result;    
+}
+
+struct HeartbeatRequest {
+    1: optional list<TaskStatus> task_status;
 }
 
 service Scheduler {
