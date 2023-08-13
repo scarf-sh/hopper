@@ -1,3 +1,6 @@
+Hopper offers primitives for distributed task processing in Haskell, simplifying asynchronous workflows and 
+efficient task scheduling.
+
 # Example 
 
 hopper-distributed comes with an example application. The example application binary can run both scheduler 
