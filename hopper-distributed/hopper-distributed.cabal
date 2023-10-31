@@ -25,6 +25,7 @@ common stuff
     GADTs
     NamedFieldPuns
     OverloadedStrings
+    RankNTypes
     RecordWildCards
     StandaloneDeriving
     TypeApplications
@@ -44,6 +45,7 @@ library
   exposed-modules:
     Hopper.Distributed.Executor
     Hopper.Distributed.Scheduler
+    Hopper.Distributed.Scheduler.Trace
     Hopper.Distributed.ThriftClient
     Hopper.Distributed.ThriftServer
 

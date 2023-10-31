@@ -4,6 +4,7 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (Concurrently (..))
 import qualified Hopper.Distributed.Executor
 import qualified Hopper.Distributed.Scheduler
+import Hopper.Distributed.Scheduler.Trace (nullTracer)
 import qualified Hopper.Scheduler
 import System.Random (randomIO, randomRIO)
 
@@ -48,5 +49,5 @@ main = do
                           Nothing
                   )
               <*> ( Concurrently $
-                      Hopper.Distributed.Scheduler.run scheduler
+                      Hopper.Distributed.Scheduler.run nullTracer scheduler
                   )
