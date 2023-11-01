@@ -13,6 +13,9 @@ module Hopper.Distributed.ThriftServer
     runSettingsChannelMaker,
     SocketConnection,
     newSocketConnection,
+    --
+    ThriftApp,
+    EndpointAddress,
   )
 where
 
@@ -63,6 +66,10 @@ import qualified Pinch.Transport.Builder
 import System.IO.Error (ioeGetErrorType)
 import qualified System.TimeManager
 
+type EndpointAddress = ByteString
+
+type ThriftApp = EndpointAddress -> ThriftServer
+
 data Settings = Settings
   { port :: Int,
     host :: HostPreference,
@@ -89,7 +96,7 @@ defaultSettings =
       fork = defaultFork
     }
 
-runSettings :: Settings -> Context -> ThriftServer -> IO ()
+runSettings :: Settings -> Context -> ThriftApp -> IO ()
 runSettings settings context server = do
   bracket
     (bindPortTCP settings.port settings.host)
@@ -99,7 +106,7 @@ runSettings settings context server = do
         runSettingsSocket settings socket context server
     )
 
-runSettingsSocket :: Settings -> Socket -> Context -> ThriftServer -> IO ()
+runSettingsSocket :: Settings -> Socket -> Context -> ThriftApp -> IO ()
 runSettingsSocket settings socket context server = do
   settings.installShutdownHandler closeListeningSocket
   runSettingsConnection settings getConnection context server
@@ -107,27 +114,27 @@ runSettingsSocket settings socket context server = do
     closeListeningSocket :: IO ()
     closeListeningSocket = close socket
 
-    getConnection :: IO (SocketConnection, IO ())
+    getConnection :: IO (EndpointAddress, SocketConnection, IO ())
     getConnection = do
-      (socket, _socketAddr) <- settings.accept socket
+      (socket, socketAddr) <- settings.accept socket
       withFdSocket socket setCloseOnExecIfNeeded
       -- NoDelay causes an error for AF_UNIX.
       setSocketOption socket NoDelay 1 `catch` \(_ :: SomeException) -> return ()
       socketConnection <- newSocketConnection socket
-      pure (socketConnection, close socket)
+      pure (show socketAddr, socketConnection, close socket)
 
-runSettingsConnection :: (Connection connection) => Settings -> IO (connection, IO ()) -> Context -> ThriftServer -> IO ()
+runSettingsConnection :: (Connection connection) => Settings -> IO (EndpointAddress, connection, IO ()) -> Context -> ThriftApp -> IO ()
 runSettingsConnection settings@Settings {createChannel} getConnection context server = do
   runSettingsChannelMaker settings getChannel context server
   where
-    getChannel :: IO (IO (Channel, IO ()))
+    getChannel :: IO (IO (EndpointAddress, Channel, IO ()))
     getChannel = do
-      (connection, closeConnection) <- getConnection
+      (endpoint, connection, closeConnection) <- getConnection
       pure $ do
         channel <- createChannel connection
-        pure (channel, closeConnection)
+        pure (endpoint, channel, closeConnection)
 
-runSettingsChannelMaker :: Settings -> IO (IO (Channel, IO ())) -> Context -> ThriftServer -> IO ()
+runSettingsChannelMaker :: Settings -> IO (IO (EndpointAddress, Channel, IO ())) -> Context -> ThriftApp -> IO ()
 runSettingsChannelMaker !settings@Settings {fork = forkWithUnmask} getChannelMaker context server = do
   -- First mask all exceptions in acceptLoop. This is necessary to
   -- ensure that no async exception is throw between the call to
@@ -184,10 +191,10 @@ runSettingsChannelMaker !settings@Settings {fork = forkWithUnmask} getChannelMak
         -- exception, we will leak the connection.
         bracket channelMaker cleanup (serve manager unmask)
 
-    cleanup (_channel, closeChannel) =
+    cleanup (_endpontAddress, _channel, closeChannel) =
       closeChannel
 
-    serve manager unmask (channel, closeChannel) =
+    serve manager unmask (endpontAddress, channel, closeChannel) =
       bracket register cancel $ \timer ->
         -- We now have fully registered a connection close handler in
         -- the case of all exceptions, so it is safe to once again
@@ -195,7 +202,7 @@ runSettingsChannelMaker !settings@Settings {fork = forkWithUnmask} getChannelMak
         unmask
           ( runConnection
               context
-              server
+              (server endpontAddress)
               (wrapChannel timer channel)
           )
       where
