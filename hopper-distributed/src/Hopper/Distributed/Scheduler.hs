@@ -7,6 +7,7 @@ module Hopper.Distributed.Scheduler
 where
 
 import qualified Control.Concurrent.Async
+import qualified Control.Exception
 import qualified Hopper.Distributed.Scheduler.Trace
 import qualified Hopper.Distributed.ThriftServer
 import qualified Hopper.Scheduler
@@ -103,6 +104,8 @@ heartbeat Hopper.Distributed.Scheduler.Trace.Tracer {..} scheduler request = voi
   withSpan (Hopper.Distributed.Scheduler.Trace.HeartbeatSpan taskStatus) $ \span -> do
     success <-
       Hopper.Scheduler.reportTaskStatus scheduler taskStatus (Just 1)
-    unless success $
+    unless success $ do
       tagSpan span [Hopper.Distributed.Scheduler.Trace.Timeout]
-    pure success
+      -- Updating the result timed out. Signal that to the executor to make it send
+      -- the heartbeat again.
+      Control.Exception.throwIO Hopper.Thrift.Hopper.Types.TimeoutError

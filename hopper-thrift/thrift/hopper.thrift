@@ -20,15 +20,19 @@ union TaskResult {
 
 struct TaskStatus {
     1: optional TaskId task_id;
-    2: optional TaskResult task_result;    
+    2: optional TaskResult task_result;
 }
 
 struct HeartbeatRequest {
     1: optional list<TaskStatus> task_status;
 }
 
+exception TimeoutError {}
+
 service Scheduler {
     RequestNextTaskResponse requestNextTask(1: RequestNextTaskRequest requestNextTaskRequest),
 
-    void heartbeat(1: HeartbeatRequest heartbeat)
+    // A Timeout error indicates the executor should retry. This is especially important
+    // when reporting TaskResults.
+    void heartbeat(1: HeartbeatRequest heartbeat) throws (1:TimeoutError timeout)
 }

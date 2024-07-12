@@ -55,11 +55,13 @@ library
     , async
     , base               ^>=4.17.0.0
     , bytestring
+    , exceptions
     , hopper
     , hopper-thrift
     , network
     , pinch              >=0.5.0.0
     , recv
+    , retry
     , serialise
     , streaming-commons
     , time-manager

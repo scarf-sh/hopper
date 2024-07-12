@@ -1,7 +1,11 @@
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Hopper.Distributed.Executor (run) where
 
 import Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.Async
+import qualified Control.Monad.Catch
+import qualified Control.Retry
 import qualified Data.Vector
 import Hopper.Distributed.Scheduler (Task (..))
 import Hopper.Distributed.ThriftClient (Client, call, newClient)
@@ -38,21 +42,19 @@ run schedulerHost schedulerPort executeTask = do
             taskId
             (executeTask taskId (Task task))
 
-        void $
-          call
-            client
-            ( Hopper.Thrift.Hopper.Client.heartbeat
-                Hopper.Thrift.Hopper.Types.HeartbeatRequest
-                  { heartbeatRequest_task_status =
-                      Just $
-                        Data.Vector.singleton
-                          ( Hopper.Thrift.Hopper.Types.TaskStatus
-                              { taskStatus_task_id = Just taskId,
-                                taskStatus_task_result = Just result
-                              }
-                          )
-                  }
-            )
+        sendHeartbeat
+          client
+          ( Hopper.Thrift.Hopper.Types.HeartbeatRequest
+              { heartbeatRequest_task_status =
+                  Just $
+                    Data.Vector.singleton
+                      ( Hopper.Thrift.Hopper.Types.TaskStatus
+                          { taskStatus_task_id = Just taskId,
+                            taskStatus_task_result = Just result
+                          }
+                      )
+              }
+          )
       Nothing ->
         pure ()
 
@@ -114,21 +116,36 @@ handleTaskExecution client timeoutInSeconds taskId execute = do
                     Hopper.Thrift.Hopper.Types.Timeout
                 )
           | otherwise -> do
-              _ <-
-                call
-                  client
-                  ( Hopper.Thrift.Hopper.Client.heartbeat
-                      Hopper.Thrift.Hopper.Types.HeartbeatRequest
-                        { heartbeatRequest_task_status =
-                            Just $
-                              Data.Vector.singleton
-                                ( Hopper.Thrift.Hopper.Types.TaskStatus
-                                    { taskStatus_task_id = Just taskId,
-                                      taskStatus_task_result = Nothing
-                                    }
-                                )
-                        }
-                  )
+              sendHeartbeat
+                client
+                ( Hopper.Thrift.Hopper.Types.HeartbeatRequest
+                    { heartbeatRequest_task_status =
+                        Just $
+                          Data.Vector.singleton
+                            ( Hopper.Thrift.Hopper.Types.TaskStatus
+                                { taskStatus_task_id = Just taskId,
+                                  taskStatus_task_result = Nothing
+                                }
+                            )
+                    }
+                )
+
               loop clock handle
         Right result ->
           pure result
+
+-- Send and retry sending a heartbeat in case the scheduler answers with a TimeoutError.
+-- This is especially important when reporting back task results not so much for simple
+-- heartbeats.
+sendHeartbeat :: Client -> Hopper.Thrift.Hopper.Types.HeartbeatRequest -> IO ()
+sendHeartbeat client heartbeatRequest = do
+  Control.Retry.recovering
+    (Control.Retry.exponentialBackoff 50000 <> Control.Retry.limitRetries 5)
+    [ \_retryStatus ->
+        Control.Monad.Catch.Handler $
+          \(_exception :: Hopper.Thrift.Hopper.Types.TimeoutError) -> pure True
+    ]
+    ( \_retryStatus ->
+        void $
+          call client (Hopper.Thrift.Hopper.Client.heartbeat heartbeatRequest)
+    )
