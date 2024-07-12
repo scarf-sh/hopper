@@ -114,6 +114,22 @@ instance Control.DeepSeq.NFData HeartbeatRequest
 
 instance Data.Hashable.Hashable HeartbeatRequest
 
+data TimeoutError = TimeoutError {}
+  deriving (Prelude.Eq, GHC.Generics.Generic, Prelude.Show)
+
+instance Pinch.Pinchable TimeoutError where
+  type Tag TimeoutError = Pinch.TStruct
+
+  pinch TimeoutError = Pinch.struct ([])
+
+  unpinch value = Prelude.pure (TimeoutError)
+
+instance Control.DeepSeq.NFData TimeoutError
+
+instance Data.Hashable.Hashable TimeoutError
+
+instance Control.Exception.Exception TimeoutError
+
 data RequestNextTask_Args = RequestNextTask_Args {requestNextTask_Args_requestNextTaskRequest :: RequestNextTaskRequest}
   deriving (Prelude.Eq, GHC.Generics.Generic, Prelude.Show)
 
@@ -157,3 +173,26 @@ instance Pinch.Pinchable Heartbeat_Args where
   unpinch value = (Prelude.pure (Heartbeat_Args) Prelude.<*> (value Pinch..: 1))
 
 instance Control.DeepSeq.NFData Heartbeat_Args
+
+instance Pinch.Internal.RPC.ThriftResult Heartbeat_Result where
+  type ResultType Heartbeat_Result = ()
+
+  unwrap (Heartbeat_Result_Timeout x) = Control.Exception.throwIO (x)
+  unwrap Heartbeat_Result_Success = Prelude.pure (())
+
+  wrap m = Control.Exception.catches ((Heartbeat_Result_Success Prelude.<$ m)) ([Control.Exception.Handler ((Prelude.pure Prelude.. Heartbeat_Result_Timeout))])
+
+data Heartbeat_Result
+  = Heartbeat_Result_Timeout TimeoutError
+  | Heartbeat_Result_Success
+  deriving (Prelude.Eq, GHC.Generics.Generic, Prelude.Show)
+
+instance Pinch.Pinchable Heartbeat_Result where
+  type Tag Heartbeat_Result = Pinch.TUnion
+
+  pinch (Heartbeat_Result_Timeout x) = Pinch.union (1) (x)
+  pinch Heartbeat_Result_Success = Pinch.pinch (Pinch.Internal.RPC.Unit)
+
+  unpinch v = ((Heartbeat_Result_Success Prelude.<$ (Pinch.unpinch v :: Pinch.Parser Pinch.Internal.RPC.Unit)) Control.Applicative.<|> (Heartbeat_Result_Timeout Prelude.<$> (v Pinch..: 1)))
+
+instance Control.DeepSeq.NFData Heartbeat_Result

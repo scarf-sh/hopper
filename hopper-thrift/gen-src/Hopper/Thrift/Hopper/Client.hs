@@ -27,5 +27,5 @@ import Prelude qualified
 requestNextTask :: (RequestNextTaskRequest) -> (Pinch.Client.ThriftCall RequestNextTask_Result)
 requestNextTask requestNextTaskRequest = Pinch.Client.TCall ("requestNextTask") (RequestNextTask_Args (requestNextTaskRequest))
 
-heartbeat :: (HeartbeatRequest) -> (Pinch.Client.ThriftCall Pinch.Internal.RPC.Unit)
+heartbeat :: (HeartbeatRequest) -> (Pinch.Client.ThriftCall Heartbeat_Result)
 heartbeat heartbeat = Pinch.Client.TCall ("heartbeat") (Heartbeat_Args (heartbeat))

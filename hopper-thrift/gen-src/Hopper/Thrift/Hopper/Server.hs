@@ -33,7 +33,7 @@ scheduler_mkServer server =
                 Pinch.Server.CallHandler ((\ctx (RequestNextTask_Args a) -> Pinch.Internal.RPC.wrap @(RequestNextTask_Result) (requestNextTask (server) (ctx) (a))))
               ),
               ( "heartbeat",
-                Pinch.Server.CallHandler ((\ctx (Heartbeat_Args a) -> Pinch.Internal.RPC.wrap @(Pinch.Internal.RPC.Unit) (heartbeat (server) (ctx) (a))))
+                Pinch.Server.CallHandler ((\ctx (Heartbeat_Args a) -> Pinch.Internal.RPC.wrap @(Heartbeat_Result) (heartbeat (server) (ctx) (a))))
               )
             ]
           )
