@@ -53,7 +53,7 @@ library
   -- other-extensions:
   build-depends:
     , async
-    , base               ^>=4.17.0.0
+    , base               <5
     , bytestring
     , exceptions
     , hopper
@@ -78,7 +78,7 @@ executable hopper-distributed
   -- other-extensions:
   build-depends:
     , async
-    , base                ^>=4.17.0.0
+    , base                <5
     , hopper
     , hopper-distributed
     , random
@@ -98,5 +98,5 @@ test-suite hopper-distributed-test
   hs-source-dirs:   test
   main-is:          Main.hs
   build-depends:
-    , base                ^>=4.17.0.0
+    , base                <5
     , hopper-distributed
