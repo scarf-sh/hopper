@@ -57,18 +57,19 @@ requestNextTask ::
   IO Hopper.Thrift.Hopper.Types.RequestNextTaskResponse
 requestNextTask Hopper.Distributed.Scheduler.Trace.Tracer {..} scheduler _request = do
   withSpan Hopper.Distributed.Scheduler.Trace.RequestNextTaskSpan $ \span -> do
-    task <-
+    attempt <-
       Hopper.Scheduler.requestTask scheduler () (Just 1)
-    case task of
-      Just task -> do
+    case attempt of
+      Just attempt -> do
         tagSpan
           span
-          [Hopper.Distributed.Scheduler.Trace.TaskId task.id]
+          [Hopper.Distributed.Scheduler.Trace.TaskId attempt.task.id]
         pure
           Hopper.Thrift.Hopper.Types.RequestNextTaskResponse
-            { requestNextTaskResponse_task_id = Just task.id,
-              requestNextTaskResponse_task = Just (taskToByteString task.task),
-              requestNextTaskResponse_timeout_in_seconds = Nothing -- TODO
+            { requestNextTaskResponse_task_id = Just attempt.task.id,
+              requestNextTaskResponse_task = Just (taskToByteString attempt.task.task),
+              requestNextTaskResponse_timeout_in_seconds = Nothing, -- TODO
+              requestNextTaskResponse_attempt = Just (fromIntegral attempt.attempt)
             }
       Nothing -> do
         tagSpan span [Hopper.Distributed.Scheduler.Trace.Timeout]
@@ -76,7 +77,8 @@ requestNextTask Hopper.Distributed.Scheduler.Trace.Tracer {..} scheduler _reques
           Hopper.Thrift.Hopper.Types.RequestNextTaskResponse
             { requestNextTaskResponse_task_id = Nothing,
               requestNextTaskResponse_task = Nothing,
-              requestNextTaskResponse_timeout_in_seconds = Nothing
+              requestNextTaskResponse_timeout_in_seconds = Nothing,
+              requestNextTaskResponse_attempt = Nothing
             }
 
 heartbeat ::

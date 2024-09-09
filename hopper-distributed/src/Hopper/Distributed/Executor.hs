@@ -1,6 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module Hopper.Distributed.Executor (run) where
+module Hopper.Distributed.Executor (Attempt (..), run) where
 
 import Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.Async
@@ -13,10 +13,16 @@ import Hopper.Scheduler (TaskId, TaskResult)
 import qualified Hopper.Thrift.Hopper.Client
 import qualified Hopper.Thrift.Hopper.Types
 
+data Attempt = Attempt
+  { attempt :: Int,
+    taskId :: TaskId Task,
+    task :: Task
+  }
+
 run ::
   ByteString ->
   Int ->
-  (TaskId Task -> Task -> IO (TaskResult Task)) ->
+  (Attempt -> IO (TaskResult Task)) ->
   IO ()
 run schedulerHost schedulerPort executeTask = do
   client <- newClient schedulerHost schedulerPort
@@ -31,16 +37,26 @@ run schedulerHost schedulerPort executeTask = do
               }
         )
 
-    case (,)
+    case (,,)
       <$> requestNextTaskResponse.requestNextTaskResponse_task_id
-      <*> requestNextTaskResponse.requestNextTaskResponse_task of
-      Just (taskId, task) -> do
+      <*> requestNextTaskResponse.requestNextTaskResponse_task
+      <*> pure requestNextTaskResponse.requestNextTaskResponse_attempt of
+      Just (taskId, task, attempt) -> do
         result <-
           handleTaskExecution
             client
             (fmap fromIntegral requestNextTaskResponse.requestNextTaskResponse_timeout_in_seconds)
             taskId
-            (executeTask taskId (Task task))
+            ( executeTask
+                ( Attempt
+                    { attempt =
+                        maybe 1 fromIntegral attempt,
+                      task =
+                        Task {taskToByteString = task},
+                      taskId
+                    }
+                )
+            )
 
         sendHeartbeat
           client

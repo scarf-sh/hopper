@@ -13,13 +13,13 @@ main = do
   args <- getArgs
   if args == ["executor"]
     then do
-      Hopper.Distributed.Executor.run "localhost" 4000 $ \taskId task -> do
+      Hopper.Distributed.Executor.run "localhost" 4000 $ \attempt -> do
         shouldFail <- randomIO
 
         when shouldFail $
           error "this one failed"
 
-        print (taskId, task)
+        print (attempt.taskId, attempt.task, attempt.attempt)
         pure "done"
     else do
       let handleLostTask task reason =

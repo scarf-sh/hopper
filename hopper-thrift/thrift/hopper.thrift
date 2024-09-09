@@ -8,6 +8,7 @@ struct RequestNextTaskResponse {
     1: optional TaskId task_id;
     2: optional binary task;
     3: optional i32 timeout_in_seconds;
+    4: optional i32 attempt;
 }
 
 struct Timeout {}

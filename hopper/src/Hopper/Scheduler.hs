@@ -10,6 +10,7 @@ module Hopper.Scheduler
     Timeout (..),
     Scheduler,
     Scheduler.Task (..),
+    Scheduler.Attempt (..),
     Scheduler.TaskId,
     Scheduler.TaskResult,
     TaskExecutionError (..),
@@ -39,7 +40,7 @@ data Scheduler node task = Scheduler
     -- block in case the scheduler is not ready to receive the status.
     reportTaskStatus :: [(Scheduler.TaskId task, Bool)] -> STM (),
     -- | Workers request tasks from the scheduler. This is a blocking action.
-    requestTask :: node -> STM (Scheduler.Task task),
+    requestTask :: node -> STM (Scheduler.Attempt node task),
     -- | Report back the result of task execution back to the driver application.
     reportTaskResult :: Scheduler.TaskId task -> Either TaskExecutionError (Scheduler.TaskResult task) -> IO ()
   }
@@ -95,7 +96,7 @@ withScheduler reportLostTasks reportTaskResult action =
             reportTaskStatus = \taskStatus ->
               scheduler.reportTaskStatus taskStatus,
             requestTask = \node ->
-              fmap (.task) (scheduler.schedule node)
+              scheduler.schedule node
           }
 
 -- | Blocking action running until shutdown is being requested.
@@ -122,7 +123,7 @@ scheduleTask runtime id task timeout = do
       timeout
   pure (isJust result)
 
-requestTask :: Scheduler node task -> node -> Maybe Timeout -> IO (Maybe (Scheduler.Task task))
+requestTask :: Scheduler node task -> node -> Maybe Timeout -> IO (Maybe (Scheduler.Attempt node task))
 requestTask runtime node timeout =
   withTimeout
     runtime

@@ -39,15 +39,15 @@ instance Control.DeepSeq.NFData RequestNextTaskRequest
 
 instance Data.Hashable.Hashable RequestNextTaskRequest
 
-data RequestNextTaskResponse = RequestNextTaskResponse {requestNextTaskResponse_task_id :: (Prelude.Maybe TaskId), requestNextTaskResponse_task :: (Prelude.Maybe Data.ByteString.ByteString), requestNextTaskResponse_timeout_in_seconds :: (Prelude.Maybe Data.Int.Int32)}
+data RequestNextTaskResponse = RequestNextTaskResponse {requestNextTaskResponse_task_id :: (Prelude.Maybe TaskId), requestNextTaskResponse_task :: (Prelude.Maybe Data.ByteString.ByteString), requestNextTaskResponse_timeout_in_seconds :: (Prelude.Maybe Data.Int.Int32), requestNextTaskResponse_attempt :: (Prelude.Maybe Data.Int.Int32)}
   deriving (Prelude.Eq, GHC.Generics.Generic, Prelude.Show)
 
 instance Pinch.Pinchable RequestNextTaskResponse where
   type Tag RequestNextTaskResponse = Pinch.TStruct
 
-  pinch (RequestNextTaskResponse requestNextTaskResponse_task_id requestNextTaskResponse_task requestNextTaskResponse_timeout_in_seconds) = Pinch.struct ([(1 Pinch.?= requestNextTaskResponse_task_id), (2 Pinch.?= requestNextTaskResponse_task), (3 Pinch.?= requestNextTaskResponse_timeout_in_seconds)])
+  pinch (RequestNextTaskResponse requestNextTaskResponse_task_id requestNextTaskResponse_task requestNextTaskResponse_timeout_in_seconds requestNextTaskResponse_attempt) = Pinch.struct ([(1 Pinch.?= requestNextTaskResponse_task_id), (2 Pinch.?= requestNextTaskResponse_task), (3 Pinch.?= requestNextTaskResponse_timeout_in_seconds), (4 Pinch.?= requestNextTaskResponse_attempt)])
 
-  unpinch value = (((Prelude.pure (RequestNextTaskResponse) Prelude.<*> (value Pinch..:? 1)) Prelude.<*> (value Pinch..:? 2)) Prelude.<*> (value Pinch..:? 3))
+  unpinch value = ((((Prelude.pure (RequestNextTaskResponse) Prelude.<*> (value Pinch..:? 1)) Prelude.<*> (value Pinch..:? 2)) Prelude.<*> (value Pinch..:? 3)) Prelude.<*> (value Pinch..:? 4))
 
 instance Control.DeepSeq.NFData RequestNextTaskResponse
 

@@ -1,6 +1,5 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# OPTIONS_GHC -O2 -ddump-prep -ddump-to-file -dsuppress-all #-}
 
 module Hopper.Scheduler.Internal
   ( Epoch,
