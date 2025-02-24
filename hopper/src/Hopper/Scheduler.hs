@@ -4,7 +4,6 @@ module Hopper.Scheduler
   ( withScheduler,
     run,
     shutdown,
-    scheduleTask,
     requestTask,
     reportTaskStatus,
     Timeout (..),
@@ -33,14 +32,11 @@ data Scheduler node task = Scheduler
     driver :: Scheduler.Driver,
     -- | Request the shutdown, once initiated, can't be undone. Action is idemptotent and non-blocking.
     requestShutdown :: STM (),
-    -- | Schedule a task to the scheduler. This operation will block in case
-    -- the scheduler is not ready to schedule the task.
-    scheduleTask :: Scheduler.Task task -> STM (),
     -- | Heartbeat a task and maybe report the result of the task. This operation will
     -- block in case the scheduler is not ready to receive the status.
     reportTaskStatus :: [(Scheduler.TaskId task, Bool)] -> STM (),
     -- | Workers request tasks from the scheduler. This is a blocking action.
-    requestTask :: node -> STM (Scheduler.Attempt node task),
+    requestTask :: node -> IO (Scheduler.Attempt node task),
     -- | Report back the result of task execution back to the driver application.
     reportTaskResult :: Scheduler.TaskId task -> Either TaskExecutionError (Scheduler.TaskResult task) -> IO ()
   }
@@ -53,18 +49,20 @@ withScheduler ::
     Show (Scheduler.TaskId task),
     Show (Scheduler.TaskResult task)
   ) =>
+  -- | Ask for the next task to schedule. We pass in the node to schedule the task on as well as the
+  -- the currently running tasks.
+  ( node ->
+    HashMap (Scheduler.TaskId task) (Scheduler.Attempt node task) ->
+    IO (Scheduler.Task task)
+  ) ->
   -- | A way for the scheduler to report a task has been lost.
   ([Scheduler.Task task] -> Scheduler.Reason -> IO ()) ->
   -- | A way for the scheduler to report a task result back to the driver
   (Scheduler.TaskId task -> Either TaskExecutionError (Scheduler.TaskResult task) -> IO ()) ->
   (Scheduler node task -> IO r) ->
   IO r
-withScheduler reportLostTasks reportTaskResult action =
+withScheduler requestNextTask reportLostTasks reportTaskResult action =
   withClock 1 $ \epoch -> do
-    -- For now, the task queue has room for exactly one element, making the
-    -- task producer and scheduler run at the same rate without any intermediate
-    -- buffering.
-    taskQueue <- newEmptyTMVarIO
     lostTaskQueue <- newEmptyTMVarIO
 
     scheduler <-
@@ -72,8 +70,7 @@ withScheduler reportLostTasks reportTaskResult action =
         Scheduler.scheduler
           Scheduler.Inputs
             { epoch,
-              taskToSchedule =
-                takeTMVar taskQueue,
+              requestNextTask,
               lostTask = \attemptedTasks reason ->
                 putTMVar lostTaskQueue ((fmap (.task) attemptedTasks), reason)
             }
@@ -91,8 +88,6 @@ withScheduler reportLostTasks reportTaskResult action =
               scheduler.driver,
             requestShutdown =
               scheduler.shutdown,
-            scheduleTask = \task ->
-              putTMVar taskQueue task,
             reportTaskStatus = \taskStatus ->
               scheduler.reportTaskStatus taskStatus,
             requestTask = \node ->
@@ -113,22 +108,9 @@ run runtime = loop runtime.driver
 shutdown :: Scheduler node task -> IO ()
 shutdown runtime = atomically runtime.requestShutdown
 
--- | Schedules a task. If no timeout is specified this operation will block indenfinitely.
-scheduleTask :: Scheduler node task -> Scheduler.TaskId task -> task -> Maybe Timeout -> IO Bool
-scheduleTask runtime id task timeout = do
-  result <-
-    withTimeout
-      runtime
-      (runtime.scheduleTask (Scheduler.Task {id, task}))
-      timeout
-  pure (isJust result)
-
 requestTask :: Scheduler node task -> node -> Maybe Timeout -> IO (Maybe (Scheduler.Attempt node task))
 requestTask runtime node timeout =
-  withTimeout
-    runtime
-    (runtime.requestTask node)
-    timeout
+  Just <$> runtime.requestTask node
 
 reportTaskStatus ::
   Scheduler node task ->

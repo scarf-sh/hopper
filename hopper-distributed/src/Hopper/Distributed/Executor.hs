@@ -7,24 +7,24 @@ import qualified Control.Concurrent.Async
 import qualified Control.Monad.Catch
 import qualified Control.Retry
 import qualified Data.Vector
-import Hopper.Distributed.Scheduler (Task (..))
+import Hopper.Distributed.Scheduler (Encoder (..), TaskId, TaskResult)
 import Hopper.Distributed.ThriftClient (Client, call, newClient)
-import Hopper.Scheduler (TaskId, TaskResult)
 import qualified Hopper.Thrift.Hopper.Client
 import qualified Hopper.Thrift.Hopper.Types
 
-data Attempt = Attempt
+data Attempt task = Attempt
   { attempt :: Int,
-    taskId :: TaskId Task,
-    task :: Task
+    taskId :: TaskId task,
+    task :: task
   }
 
 run ::
+  Encoder task ->
   ByteString ->
   Int ->
-  (Attempt -> IO (TaskResult Task)) ->
+  (Attempt task -> IO (TaskResult task)) ->
   IO ()
-run schedulerHost schedulerPort executeTask = do
+run encoder@Encoder {..} schedulerHost schedulerPort executeTask = do
   client <- newClient schedulerHost schedulerPort
 
   forever $ do
@@ -41,46 +41,49 @@ run schedulerHost schedulerPort executeTask = do
       <$> requestNextTaskResponse.requestNextTaskResponse_task_id
       <*> requestNextTaskResponse.requestNextTaskResponse_task
       <*> pure requestNextTaskResponse.requestNextTaskResponse_attempt of
-      Just (taskId, task, attempt) -> do
-        result <-
-          handleTaskExecution
-            client
-            (fmap fromIntegral requestNextTaskResponse.requestNextTaskResponse_timeout_in_seconds)
-            taskId
-            ( executeTask
-                ( Attempt
-                    { attempt =
-                        maybe 1 fromIntegral attempt,
-                      task =
-                        Task {taskToByteString = task},
-                      taskId
-                    }
+      Just (encodedTaskId, task, attempt)
+        | Just taskId <- decodeTaskId encodedTaskId,
+          Just task <- decodeTask task -> do
+            result <-
+              handleTaskExecution
+                encoder
+                client
+                (fmap fromIntegral requestNextTaskResponse.requestNextTaskResponse_timeout_in_seconds)
+                taskId
+                ( executeTask
+                    ( Attempt
+                        { attempt =
+                            maybe 1 fromIntegral attempt,
+                          taskId,
+                          task
+                        }
+                    )
                 )
-            )
 
-        sendHeartbeat
-          client
-          ( Hopper.Thrift.Hopper.Types.HeartbeatRequest
-              { heartbeatRequest_task_status =
-                  Just $
-                    Data.Vector.singleton
-                      ( Hopper.Thrift.Hopper.Types.TaskStatus
-                          { taskStatus_task_id = Just taskId,
-                            taskStatus_task_result = Just result
-                          }
-                      )
-              }
-          )
-      Nothing ->
+            sendHeartbeat
+              client
+              ( Hopper.Thrift.Hopper.Types.HeartbeatRequest
+                  { heartbeatRequest_task_status =
+                      Just $
+                        Data.Vector.singleton
+                          ( Hopper.Thrift.Hopper.Types.TaskStatus
+                              { taskStatus_task_id = Just encodedTaskId,
+                                taskStatus_task_result = Just result
+                              }
+                          )
+                  }
+              )
+      _ ->
         pure ()
 
 handleTaskExecution ::
+  Encoder task ->
   Client ->
   Maybe Int ->
-  TaskId Task ->
-  IO (TaskResult Task) ->
+  TaskId task ->
+  IO (TaskResult task) ->
   IO Hopper.Thrift.Hopper.Types.TaskResult
-handleTaskExecution client timeoutInSeconds taskId execute = do
+handleTaskExecution Encoder {..} client timeoutInSeconds taskId execute = do
   clockVar <- newTVarIO 0
   Control.Concurrent.Async.withAsync (ticker clockVar) $ \_clockThread ->
     Control.Concurrent.Async.withAsync execute $ \handle -> do
@@ -115,7 +118,7 @@ handleTaskExecution client timeoutInSeconds taskId execute = do
                     pure $
                       Right
                         ( Hopper.Thrift.Hopper.Types.TaskResult_Task_result
-                            result
+                            (encodeTaskResult result)
                         ),
               do
                 t1 <- clock
@@ -139,7 +142,7 @@ handleTaskExecution client timeoutInSeconds taskId execute = do
                         Just $
                           Data.Vector.singleton
                             ( Hopper.Thrift.Hopper.Types.TaskStatus
-                                { taskStatus_task_id = Just taskId,
+                                { taskStatus_task_id = Just (encodeTaskId taskId),
                                   taskStatus_task_result = Nothing
                                 }
                             )

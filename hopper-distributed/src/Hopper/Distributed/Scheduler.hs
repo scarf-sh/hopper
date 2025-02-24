@@ -1,7 +1,16 @@
+{-# LANGUAGE TypeOperators #-}
+
 module Hopper.Distributed.Scheduler
-  ( Task (..),
+  ( -- * Encode tasks, task id and task result
+    Encoder (..),
+    identityEncoder,
+
+    -- * Running and scheduling
+    Hopper.Scheduler.TaskId,
+    Hopper.Scheduler.TaskResult,
+    Hopper.Scheduler.Task (..),
     Hopper.Scheduler.withScheduler,
-    Hopper.Scheduler.scheduleTask,
+    Node,
     run,
   )
 where
@@ -15,20 +24,56 @@ import qualified Hopper.Thrift.Hopper.Server
 import qualified Hopper.Thrift.Hopper.Types
 import Prelude hiding (State)
 
-type Node = ()
+-- | In order to send task ids, tasks and results over the network we need
+-- to be able to serialize them.
+data Encoder task = Encoder
+  { encodeTaskId ::
+      Hopper.Scheduler.TaskId task ->
+      ByteString,
+    decodeTaskId ::
+      ByteString ->
+      Maybe (Hopper.Scheduler.TaskId task),
+    encodeTaskResult ::
+      Hopper.Scheduler.TaskResult task ->
+      ByteString,
+    decodeTaskResult ::
+      ByteString ->
+      Maybe (Hopper.Scheduler.TaskResult task),
+    encodeTask ::
+      task ->
+      ByteString,
+    decodeTask ::
+      ByteString ->
+      Maybe task
+  }
 
-newtype Task = Task {taskToByteString :: ByteString}
-  deriving stock (Show)
+-- | A simple encoder that knows how to encode things that are 'ByteString's
+-- already over the network.
+identityEncoder ::
+  ( Coercible task ByteString,
+    Coercible (Hopper.Scheduler.TaskResult task) ByteString,
+    Coercible (Hopper.Scheduler.TaskId task) ByteString
+  ) =>
+  Encoder task
+identityEncoder =
+  Encoder
+    { encodeTaskId = coerce,
+      decodeTaskId = Just . coerce,
+      encodeTaskResult = coerce,
+      decodeTaskResult = Just . coerce,
+      encodeTask = coerce,
+      decodeTask = Just . coerce
+    }
 
-type instance Hopper.Scheduler.TaskId Task = ByteString
-
-type instance Hopper.Scheduler.TaskResult Task = ByteString
+-- | In this scheduler, 'Node' is represented by the endpoint address.
+type Node = ByteString
 
 run ::
-  Hopper.Distributed.Scheduler.Trace.Tracer ->
-  Hopper.Scheduler.Scheduler Node Task ->
+  Encoder task ->
+  Hopper.Distributed.Scheduler.Trace.Tracer task ->
+  Hopper.Scheduler.Scheduler Node task ->
   IO ()
-run tracer' scheduler =
+run encoder tracer' scheduler =
   Control.Concurrent.Async.race_ runScheduler runServer
   where
     runScheduler =
@@ -45,20 +90,22 @@ run tracer' scheduler =
                     tracer'
             Hopper.Thrift.Hopper.Server.scheduler_mkServer
               Hopper.Thrift.Hopper.Server.Scheduler
-                { requestNextTask = \_context -> requestNextTask tracer scheduler,
-                  heartbeat = \_context -> heartbeat tracer scheduler
+                { requestNextTask = \_context -> requestNextTask encoder endpointAddress tracer scheduler,
+                  heartbeat = \_context -> heartbeat encoder tracer scheduler
                 }
         )
 
 requestNextTask ::
-  Hopper.Distributed.Scheduler.Trace.Tracer ->
-  Hopper.Scheduler.Scheduler Node Task ->
+  Encoder task ->
+  Node ->
+  Hopper.Distributed.Scheduler.Trace.Tracer task ->
+  Hopper.Scheduler.Scheduler Node task ->
   Hopper.Thrift.Hopper.Types.RequestNextTaskRequest ->
   IO Hopper.Thrift.Hopper.Types.RequestNextTaskResponse
-requestNextTask Hopper.Distributed.Scheduler.Trace.Tracer {..} scheduler _request = do
+requestNextTask Encoder {..} node Hopper.Distributed.Scheduler.Trace.Tracer {..} scheduler _request = do
   withSpan Hopper.Distributed.Scheduler.Trace.RequestNextTaskSpan $ \span -> do
     attempt <-
-      Hopper.Scheduler.requestTask scheduler () (Just 1)
+      Hopper.Scheduler.requestTask scheduler node (Just 1)
     case attempt of
       Just attempt -> do
         tagSpan
@@ -66,8 +113,8 @@ requestNextTask Hopper.Distributed.Scheduler.Trace.Tracer {..} scheduler _reques
           [Hopper.Distributed.Scheduler.Trace.TaskId attempt.task.id]
         pure
           Hopper.Thrift.Hopper.Types.RequestNextTaskResponse
-            { requestNextTaskResponse_task_id = Just attempt.task.id,
-              requestNextTaskResponse_task = Just (taskToByteString attempt.task.task),
+            { requestNextTaskResponse_task_id = Just (encodeTaskId attempt.task.id),
+              requestNextTaskResponse_task = Just (encodeTask attempt.task.task),
               requestNextTaskResponse_timeout_in_seconds = Nothing, -- TODO
               requestNextTaskResponse_attempt = Just (fromIntegral attempt.attempt)
             }
@@ -82,15 +129,20 @@ requestNextTask Hopper.Distributed.Scheduler.Trace.Tracer {..} scheduler _reques
             }
 
 heartbeat ::
-  Hopper.Distributed.Scheduler.Trace.Tracer ->
-  Hopper.Scheduler.Scheduler Node Task ->
+  Encoder task ->
+  Hopper.Distributed.Scheduler.Trace.Tracer task ->
+  Hopper.Scheduler.Scheduler Node task ->
   Hopper.Thrift.Hopper.Types.HeartbeatRequest ->
   IO ()
-heartbeat Hopper.Distributed.Scheduler.Trace.Tracer {..} scheduler request = void $ do
+heartbeat Encoder {..} Hopper.Distributed.Scheduler.Trace.Tracer {..} scheduler request = void $ do
   let taskStatus =
         [ (taskId, taskResult)
           | taskStatus <- maybe [] toList request.heartbeatRequest_task_status,
-            Just taskId <- [taskStatus.taskStatus_task_id],
+            Just taskId <-
+              [ case taskStatus.taskStatus_task_id of
+                  Just taskId -> decodeTaskId taskId
+                  Nothing -> Nothing -- TODO error?
+              ],
             let taskResult =
                   case taskStatus.taskStatus_task_result of
                     Just (Hopper.Thrift.Hopper.Types.TaskResult_Error_message errorMessage) ->
@@ -98,7 +150,11 @@ heartbeat Hopper.Distributed.Scheduler.Trace.Tracer {..} scheduler request = voi
                     Just (Hopper.Thrift.Hopper.Types.TaskResult_Timeout {}) ->
                       Just (Left Hopper.Scheduler.TaskExecutionTimedOut)
                     Just (Hopper.Thrift.Hopper.Types.TaskResult_Task_result result) ->
-                      Just (Right result)
+                      case decodeTaskResult result of
+                        Just result ->
+                          Just (Right result)
+                        Nothing ->
+                          Just (Left (Hopper.Scheduler.TaskExecutionException "could not decode task result"))
                     Nothing ->
                       Nothing
         ]

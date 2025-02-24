@@ -8,27 +8,28 @@ module Hopper.Distributed.Scheduler.Trace
 where
 
 import Hopper.Scheduler (TaskExecutionError)
+import qualified Hopper.Scheduler
 
-data Tag
+data Tag task
   = Timeout
-  | TaskId ByteString
+  | TaskId (Hopper.Scheduler.TaskId task)
   | Endpoint ByteString
 
-data Span
+data Span task
   = RequestNextTaskSpan
-  | HeartbeatSpan [(ByteString, Maybe (Either TaskExecutionError ByteString))]
+  | HeartbeatSpan [(Hopper.Scheduler.TaskId task, Maybe (Either TaskExecutionError (Hopper.Scheduler.TaskResult task)))]
 
 -- | A lightweight abstraction to trace execution in the distributed scheduler.
-data Tracer = forall span.
+data Tracer task = forall span.
   Tracer
   { -- | Wrap a computation inside a @span@.
-    withSpan :: forall a. Span -> (span -> IO a) -> IO a,
+    withSpan :: forall a. Span task -> (span -> IO a) -> IO a,
     -- | Tag a @span@ with additional info.
-    tagSpan :: span -> [Tag] -> IO ()
+    tagSpan :: span -> [Tag task] -> IO ()
   }
 
 -- | Tracer that doesn't trace anything.
-nullTracer :: Tracer
+nullTracer :: Tracer task
 nullTracer =
   Tracer
     { withSpan =
@@ -38,7 +39,7 @@ nullTracer =
     }
 
 -- | Tag each @span@ with @tags@.
-withTags :: [Tag] -> Tracer -> Tracer
+withTags :: [Tag task] -> Tracer task -> Tracer task
 withTags tags Tracer {..} =
   Tracer
     { withSpan = \span action ->
