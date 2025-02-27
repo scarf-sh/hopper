@@ -69,7 +69,7 @@ data Inputs node task = Inputs
       node ->
       HashMap (TaskGroup task) Int ->
       HashMap (TaskId task) (Attempt node task) ->
-      IO (Task task)
+      IO (Maybe (Task task))
   }
 
 data State node task = State
@@ -80,7 +80,7 @@ data State node task = State
   }
 
 data Scheduler node task = Scheduler
-  { schedule :: node -> IO (Attempt node task),
+  { schedule :: node -> IO (Maybe (Attempt node task)),
     reportTaskStatus :: [(TaskId task, Bool)] -> STM (),
     shutdown :: STM (),
     driver :: Driver
@@ -144,25 +144,30 @@ scheduler !inputs = do
           scheduleTaskOnNode state
       }
   where
-    scheduleTaskOnNode :: State node task -> node -> IO (Attempt node task)
+    scheduleTaskOnNode :: State node task -> node -> IO (Maybe (Attempt node task))
     scheduleTaskOnNode !state node = do
       tasks <- readTVarIO state.tasks
       task <- inputs.requestNextTask node mempty tasks
-      atomically $ do
-        epoch <- inputs.epoch
-        let attempt =
-              Attempt
-                { task,
-                  epoch,
-                  node,
-                  attempt = 1
-                }
 
-        modifyTVar' state.tasks $
-          HashMap.insert task.id attempt
-        modifyTVar' state.taskGroups $
-          HashMap.insertWith (+) task.group 1
-        pure attempt
+      case task of
+        Just task ->
+          atomically $ do
+            epoch <- inputs.epoch
+            let attempt =
+                  Attempt
+                    { task,
+                      epoch,
+                      node,
+                      attempt = 1
+                    }
+
+            modifyTVar' state.tasks $
+              HashMap.insert task.id attempt
+            modifyTVar' state.taskGroups $
+              HashMap.insertWith (+) task.group 1
+            pure (Just attempt)
+        Nothing ->
+          pure Nothing
 
     reportTaskStatus :: State node task -> [(TaskId task, Bool)] -> STM ()
     reportTaskStatus !state status = do

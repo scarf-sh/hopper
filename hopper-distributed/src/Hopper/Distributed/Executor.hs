@@ -6,6 +6,7 @@ import Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.Async
 import qualified Control.Monad.Catch
 import qualified Control.Retry
+import qualified Data.IORef
 import qualified Data.Vector
 import Hopper.Distributed.Scheduler (Encoder (..), TaskId, TaskResult)
 import Hopper.Distributed.ThriftClient (Client, call, newClient)
@@ -27,6 +28,11 @@ run ::
 run encoder@Encoder {..} schedulerHost schedulerPort executeTask = do
   client <- newClient schedulerHost schedulerPort
 
+  -- We are keeping track of the backoff to apply. In cases where the scheduler
+  -- doesn't respond with a task in time - e.g. because there are no tasks we
+  -- apply an exponential backoff strategy.
+  backoffRef <- newIORef 0
+
   forever $ do
     Hopper.Thrift.Hopper.Types.RequestNextTask_Result_Success requestNextTaskResponse <-
       call
@@ -44,6 +50,9 @@ run encoder@Encoder {..} schedulerHost schedulerPort executeTask = do
       Just (encodedTaskId, task, attempt)
         | Just taskId <- decodeTaskId encodedTaskId,
           Just task <- decodeTask task -> do
+            -- Reset the backoff delay in case we got a task to chew on.
+            Data.IORef.writeIORef backoffRef 0
+
             result <-
               handleTaskExecution
                 encoder
@@ -73,8 +82,21 @@ run encoder@Encoder {..} schedulerHost schedulerPort executeTask = do
                           )
                   }
               )
-      _ ->
-        pure ()
+      _ -> do
+        -- No task received, wait and try again. Increase the backoff for the next round.
+        backoff <-
+          Data.IORef.readIORef backoffRef
+
+        when (backoff > 0) $
+          threadDelay backoff
+
+        let -- 1 milliseconds ~ 1000 microseconds
+            baseDelay = 1000
+
+            -- 1 second ~ 1000000 microseconds
+            maxDelay = 1000000
+
+        Data.IORef.writeIORef backoffRef $! min maxDelay (2 * max baseDelay backoff)
 
 handleTaskExecution ::
   Encoder task ->

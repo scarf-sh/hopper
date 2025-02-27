@@ -53,7 +53,8 @@ main = do
             print ("scheduling task" :: Text, id)
 
             pure $
-              Hopper.Scheduler.Task {id, task, group = ()}
+              Just $
+                Hopper.Scheduler.Task {id, task, group = ()}
 
           handleLostTask task reason =
             print ("Lost" :: Text, task, reason)

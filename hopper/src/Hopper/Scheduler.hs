@@ -37,7 +37,7 @@ data Scheduler node task = Scheduler
     -- block in case the scheduler is not ready to receive the status.
     reportTaskStatus :: [(Scheduler.TaskId task, Bool)] -> STM (),
     -- | Workers request tasks from the scheduler. This is a blocking action.
-    requestTask :: node -> IO (Scheduler.Attempt node task),
+    requestTask :: node -> IO (Maybe (Scheduler.Attempt node task)),
     -- | Report back the result of task execution back to the driver application.
     reportTaskResult :: Scheduler.TaskId task -> Either TaskExecutionError (Scheduler.TaskResult task) -> IO ()
   }
@@ -55,10 +55,12 @@ withScheduler ::
   ) =>
   -- | Ask for the next task to schedule. We pass in the node to schedule the task on as well as the
   -- the currently running tasks.
+  --
+  -- May return Nothing in case there's no suitable task.
   ( node ->
     HashMap (Scheduler.TaskGroup task) Int ->
     HashMap (Scheduler.TaskId task) (Scheduler.Attempt node task) ->
-    IO (Scheduler.Task task)
+    IO (Maybe (Scheduler.Task task))
   ) ->
   -- | A way for the scheduler to report a task has been lost.
   ([Scheduler.Task task] -> Scheduler.Reason -> IO ()) ->
@@ -115,7 +117,7 @@ shutdown runtime = atomically runtime.requestShutdown
 
 requestTask :: Scheduler node task -> node -> Maybe Timeout -> IO (Maybe (Scheduler.Attempt node task))
 requestTask runtime node _timeout =
-  Just <$> runtime.requestTask node
+  runtime.requestTask node
 
 reportTaskStatus ::
   Scheduler node task ->
