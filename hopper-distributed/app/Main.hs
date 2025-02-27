@@ -15,6 +15,8 @@ type instance Hopper.Scheduler.TaskId T = ByteString
 
 type instance Hopper.Scheduler.TaskResult T = ByteString
 
+type instance Hopper.Scheduler.TaskGroup T = ()
+
 -- | How to encode/decode our task type 'T', the task id and the result.
 encoder :: Hopper.Distributed.Scheduler.Encoder T
 encoder =
@@ -39,7 +41,7 @@ main = do
 
         pure ("done" :: ByteString)
     else do
-      let requestNextTask _node _state = do
+      let requestNextTask _node _groups _state = do
             id' <- randomRIO (0 :: Int, 100000000)
 
             let id :: ByteString
@@ -51,7 +53,7 @@ main = do
             print ("scheduling task" :: Text, id)
 
             pure $
-              Hopper.Scheduler.Task {id, task}
+              Hopper.Scheduler.Task {id, task, group = ()}
 
           handleLostTask task reason =
             print ("Lost" :: Text, task, reason)

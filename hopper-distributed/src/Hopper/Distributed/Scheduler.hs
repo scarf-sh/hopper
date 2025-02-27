@@ -7,6 +7,7 @@ module Hopper.Distributed.Scheduler
 
     -- * Running and scheduling
     Hopper.Scheduler.TaskId,
+    Hopper.Scheduler.TaskGroup,
     Hopper.Scheduler.TaskResult,
     Hopper.Scheduler.Task (..),
     Hopper.Scheduler.withScheduler,

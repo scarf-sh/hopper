@@ -11,6 +11,7 @@ module Hopper.Scheduler
     Scheduler.Task (..),
     Scheduler.Attempt (..),
     Scheduler.TaskId,
+    Scheduler.TaskGroup,
     Scheduler.TaskResult,
     TaskExecutionError (..),
   )
@@ -44,14 +45,18 @@ data Scheduler node task = Scheduler
 withScheduler ::
   ( Hashable (Scheduler.TaskId task),
     Eq (Scheduler.TaskId task),
+    Hashable (Scheduler.TaskGroup task),
+    Eq (Scheduler.TaskGroup task),
     Show task,
     Show node,
     Show (Scheduler.TaskId task),
+    Show (Scheduler.TaskGroup task),
     Show (Scheduler.TaskResult task)
   ) =>
   -- | Ask for the next task to schedule. We pass in the node to schedule the task on as well as the
   -- the currently running tasks.
   ( node ->
+    HashMap (Scheduler.TaskGroup task) Int ->
     HashMap (Scheduler.TaskId task) (Scheduler.Attempt node task) ->
     IO (Scheduler.Task task)
   ) ->
@@ -109,7 +114,7 @@ shutdown :: Scheduler node task -> IO ()
 shutdown runtime = atomically runtime.requestShutdown
 
 requestTask :: Scheduler node task -> node -> Maybe Timeout -> IO (Maybe (Scheduler.Attempt node task))
-requestTask runtime node timeout =
+requestTask runtime node _timeout =
   Just <$> runtime.requestTask node
 
 reportTaskStatus ::

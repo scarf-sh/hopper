@@ -4,6 +4,7 @@
 module Hopper.Scheduler.Internal
   ( Epoch,
     TaskId,
+    TaskGroup,
     TaskResult,
     Task (..),
     Attempt (..),
@@ -25,12 +26,15 @@ type family TaskId task
 
 type family TaskResult task
 
+type family TaskGroup task
+
 data Task task = Task
   { id :: TaskId task,
+    group :: TaskGroup task,
     task :: task
   }
 
-deriving instance (Show task, Show (TaskId task)) => Show (Task task)
+deriving instance (Show task, Show (TaskId task), Show (TaskGroup task)) => Show (Task task)
 
 data Attempt node task = Attempt
   { -- | The task itself.
@@ -43,7 +47,7 @@ data Attempt node task = Attempt
     node :: node
   }
 
-deriving instance (Show node, Show task, Show (TaskId task)) => Show (Attempt node task)
+deriving instance (Show node, Show task, Show (TaskId task), Show (TaskGroup task)) => Show (Attempt node task)
 
 data Reason
   = -- | The node on which the task was scheduled has gone lost.
@@ -61,13 +65,18 @@ data Inputs node task = Inputs
     lostTask :: [Attempt node task] -> Reason -> STM (),
     -- | Request the next task to schedule on a given node. Also passes the current
     -- scheduler state to the function. This allows the function to attempt.
-    requestNextTask :: node -> HashMap (TaskId task) (Attempt node task) -> IO (Task task)
+    requestNextTask ::
+      node ->
+      HashMap (TaskGroup task) Int ->
+      HashMap (TaskId task) (Attempt node task) ->
+      IO (Task task)
   }
 
 data State node task = State
   { epoch :: {-# UNPACK #-} !(TVar Epoch),
     shutdown :: {-# UNPACK #-} !(TVar Bool),
-    tasks :: {-# UNPACK #-} !(TVar (HashMap (TaskId task) (Attempt node task)))
+    tasks :: {-# UNPACK #-} !(TVar (HashMap (TaskId task) (Attempt node task))),
+    taskGroups :: {-# UNPACK #-} !(TVar (HashMap (TaskGroup task) Int))
   }
 
 data Scheduler node task = Scheduler
@@ -79,10 +88,14 @@ data Scheduler node task = Scheduler
 
 newtype Driver = Driver {runDriver :: STM (Maybe Driver)}
 
+data Pair a b = Pair !a !b
+
 scheduler ::
   forall node task.
   ( Eq (TaskId task),
     Hashable (TaskId task),
+    Eq (TaskGroup task),
+    Hashable (TaskGroup task),
     Show (TaskId task),
     Show (TaskResult task),
     Show (Attempt node task)
@@ -92,6 +105,7 @@ scheduler ::
 scheduler !inputs = do
   shutdownVar <- newTVar False
   tasksVar <- newTVar mempty
+  taskGroupsVar <- newTVar mempty
   epoch <- inputs.epoch
   epochVar <- newTVar epoch
 
@@ -99,6 +113,7 @@ scheduler !inputs = do
         State
           { shutdown = shutdownVar,
             tasks = tasksVar,
+            taskGroups = taskGroupsVar,
             epoch = epochVar
           }
 
@@ -132,7 +147,7 @@ scheduler !inputs = do
     scheduleTaskOnNode :: State node task -> node -> IO (Attempt node task)
     scheduleTaskOnNode !state node = do
       tasks <- readTVarIO state.tasks
-      task <- inputs.requestNextTask node tasks
+      task <- inputs.requestNextTask node mempty tasks
       atomically $ do
         epoch <- inputs.epoch
         let attempt =
@@ -145,30 +160,51 @@ scheduler !inputs = do
 
         modifyTVar' state.tasks $
           HashMap.insert task.id attempt
+        modifyTVar' state.taskGroups $
+          HashMap.insertWith (+) task.group 1
         pure attempt
 
     reportTaskStatus :: State node task -> [(TaskId task, Bool)] -> STM ()
     reportTaskStatus !state status = do
       epoch <- inputs.epoch
-      modifyTVar' state.tasks $ \tasks ->
-        foldl'
-          ( \tasks (taskId, isCompleted) ->
-              if isCompleted
-                then HashMap.delete taskId tasks
-                else
-                  HashMap.alter
-                    ( \attempt ->
-                        case attempt of
-                          Just Attempt {epoch = _epoch, ..} ->
-                            Just $! Attempt {epoch, ..}
-                          Nothing ->
-                            Nothing
-                    )
-                    taskId
-                    tasks
-          )
-          tasks
-          status
+
+      tasks <- readTVar state.tasks
+      taskGroups <- readTVar state.taskGroups
+
+      let Pair tasks' taskGroups' =
+            foldl'
+              ( \(Pair tasks taskGroups) (taskId, isCompleted) ->
+                  case HashMap.lookup taskId tasks of
+                    Just attempt
+                      | isCompleted ->
+                          Pair
+                            (HashMap.delete taskId tasks)
+                            ( HashMap.update
+                                ( \x ->
+                                    let !y = x - 1
+                                     in if y > 0 then Just y else Nothing
+                                )
+                                attempt.task.group
+                                taskGroups
+                            )
+                      | otherwise ->
+                          Pair
+                            ( HashMap.update
+                                ( \Attempt {epoch = _, ..} ->
+                                    Just $! Attempt {epoch, ..}
+                                )
+                                taskId
+                                tasks
+                            )
+                            taskGroups
+                    _ ->
+                      Pair tasks taskGroups
+              )
+              (Pair tasks taskGroups)
+              status
+
+      writeTVar state.tasks $! tasks'
+      writeTVar state.taskGroups $! taskGroups'
 
     onEpochChange :: State node task -> STM ()
     onEpochChange !state = do
@@ -177,6 +213,8 @@ scheduler !inputs = do
       guard (epoch /= newEpoch)
       writeTVar state.epoch newEpoch
       tasks <- readTVar state.tasks
+      taskGroups <- readTVar state.taskGroups
+
       let timedOutTasks =
             HashMap.filter
               (\attempt -> newEpoch - attempt.epoch > 10)
@@ -184,7 +222,23 @@ scheduler !inputs = do
 
           healthyTasks =
             HashMap.difference tasks timedOutTasks
+
+          newTaskGroups =
+            foldl'
+              ( \taskGroups attempt ->
+                  HashMap.update
+                    ( \x ->
+                        let !y = x - 1
+                         in if y > 0 then Just y else Nothing
+                    )
+                    attempt.task.group
+                    taskGroups
+              )
+              taskGroups
+              timedOutTasks
+
       writeTVar state.tasks $! healthyTasks
+      writeTVar state.taskGroups $! newTaskGroups
 
       unless (null timedOutTasks) $
         inputs.lostTask
