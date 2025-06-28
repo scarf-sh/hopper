@@ -27,8 +27,10 @@ type instance Hopper.Scheduler.TaskResult Task = ByteString
 run ::
   Hopper.Distributed.Scheduler.Trace.Tracer ->
   Hopper.Scheduler.Scheduler Node Task ->
+  Maybe Int ->
+  Maybe Int ->
   IO ()
-run tracer' scheduler =
+run tracer' scheduler requestTimeoutSeconds heartbeatTimeoutSeconds =
   Control.Concurrent.Async.race_ runScheduler runServer
   where
     runScheduler =
@@ -45,20 +47,21 @@ run tracer' scheduler =
                     tracer'
             Hopper.Thrift.Hopper.Server.scheduler_mkServer
               Hopper.Thrift.Hopper.Server.Scheduler
-                { requestNextTask = \_context -> requestNextTask tracer scheduler,
-                  heartbeat = \_context -> heartbeat tracer scheduler
+                { requestNextTask = \_context -> requestNextTask tracer scheduler requestTimeoutSeconds,
+                  heartbeat = \_context -> heartbeat tracer scheduler heartbeatTimeoutSeconds
                 }
         )
 
 requestNextTask ::
   Hopper.Distributed.Scheduler.Trace.Tracer ->
   Hopper.Scheduler.Scheduler Node Task ->
+  Maybe Int ->
   Hopper.Thrift.Hopper.Types.RequestNextTaskRequest ->
   IO Hopper.Thrift.Hopper.Types.RequestNextTaskResponse
-requestNextTask Hopper.Distributed.Scheduler.Trace.Tracer {..} scheduler _request = do
+requestNextTask Hopper.Distributed.Scheduler.Trace.Tracer {..} scheduler timeoutSeconds _request = do
   withSpan Hopper.Distributed.Scheduler.Trace.RequestNextTaskSpan $ \span -> do
     attempt <-
-      Hopper.Scheduler.requestTask scheduler () (Just 1)
+      Hopper.Scheduler.requestTask scheduler () (Just (Hopper.Scheduler.Timeout (fromMaybe 1 timeoutSeconds)))
     case attempt of
       Just attempt -> do
         tagSpan
@@ -84,9 +87,10 @@ requestNextTask Hopper.Distributed.Scheduler.Trace.Tracer {..} scheduler _reques
 heartbeat ::
   Hopper.Distributed.Scheduler.Trace.Tracer ->
   Hopper.Scheduler.Scheduler Node Task ->
+  Maybe Int ->
   Hopper.Thrift.Hopper.Types.HeartbeatRequest ->
   IO ()
-heartbeat Hopper.Distributed.Scheduler.Trace.Tracer {..} scheduler request = void $ do
+heartbeat Hopper.Distributed.Scheduler.Trace.Tracer {..} scheduler timeoutSeconds request = void $ do
   let taskStatus =
         [ (taskId, taskResult)
           | taskStatus <- maybe [] toList request.heartbeatRequest_task_status,
@@ -105,7 +109,7 @@ heartbeat Hopper.Distributed.Scheduler.Trace.Tracer {..} scheduler request = voi
 
   withSpan (Hopper.Distributed.Scheduler.Trace.HeartbeatSpan taskStatus) $ \span -> do
     success <-
-      Hopper.Scheduler.reportTaskStatus scheduler taskStatus (Just 1)
+      Hopper.Scheduler.reportTaskStatus scheduler taskStatus (Just (Hopper.Scheduler.Timeout (fromMaybe 1 timeoutSeconds)))
     unless success $ do
       tagSpan span [Hopper.Distributed.Scheduler.Trace.Timeout]
       -- Updating the result timed out. Signal that to the executor to make it send
