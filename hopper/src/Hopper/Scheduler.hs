@@ -185,4 +185,4 @@ withClock secondsPerEpoch action = do
     clock clockVar = forever $ do
       atomically $
         modifyTVar' clockVar (+ 1)
-      threadDelay (1000000 * secondsPerEpoch)
+      threadDelay (1000000 * secondsPerEpoch) -- Convert seconds to microseconds

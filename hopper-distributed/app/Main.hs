@@ -49,5 +49,5 @@ main = do
                           Nothing
                   )
               <*> ( Concurrently $
-                      Hopper.Distributed.Scheduler.run nullTracer scheduler
+                      Hopper.Distributed.Scheduler.run nullTracer scheduler Nothing Nothing
                   )
